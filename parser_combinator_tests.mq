@@ -1,0 +1,739 @@
+include "test"
+| include "parser_combinator"
+|
+
+# === pc_ok / pc_err ===
+
+def test_pc_ok():
+  let r = pc_ok(3, "x")
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["pos"], 3)
+  | assert_eq(r["value"], "x")
+end
+
+def test_pc_err():
+  let r = pc_err(2, "boom")
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 2)
+  | assert_eq(r["error"], "boom")
+end
+
+# === pc_pos_to_line_col ===
+
+def test_pos_to_line_col_first_line():
+  let loc = pc_pos_to_line_col("abc\ndef", 1)
+  | assert_eq(loc["line"], 1)
+  | assert_eq(loc["col"], 2)
+end
+
+def test_pos_to_line_col_second_line():
+  let loc = pc_pos_to_line_col("abc\ndef", 5)
+  | assert_eq(loc["line"], 2)
+  | assert_eq(loc["col"], 2)
+end
+
+# === pc_char ===
+
+def test_char_match():
+  let p = pc_char("a")
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "a")
+  | assert_eq(r["pos"], 1)
+end
+
+def test_char_mismatch():
+  let p = pc_char("a")
+  | let r = p("xyz", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 0)
+end
+
+def test_char_at_end_of_input():
+  let p = pc_char("a")
+  | let r = p("", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_any_char ===
+
+def test_any_char_matches():
+  let p = pc_any_char()
+  | let r = p("z", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "z")
+end
+
+def test_any_char_fails_at_eof():
+  let p = pc_any_char()
+  | let r = p("", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_tag ===
+
+def test_tag_match():
+  let p = pc_tag("foo")
+  | let r = p("foobar", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "foo")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_tag_mismatch():
+  let p = pc_tag("foo")
+  | let r = p("foxbar", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_tag_too_short_input():
+  let p = pc_tag("foo")
+  | let r = p("fo", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_satisfy / pc_one_of / pc_none_of ===
+
+def test_satisfy_match():
+  let p = pc_satisfy(fn(ch): ch == "a";)
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+end
+
+def test_one_of_match():
+  let p = pc_one_of("xyz")
+  | let r = p("yes", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "y")
+end
+
+def test_one_of_mismatch():
+  let p = pc_one_of("xyz")
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_none_of_match():
+  let p = pc_none_of("xyz")
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "a")
+end
+
+def test_none_of_mismatch():
+  let p = pc_none_of("xyz")
+  | let r = p("yes", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_digit / pc_alpha / pc_alnum / pc_space ===
+
+def test_digit_match():
+  let p = pc_digit()
+  | let r = p("5x", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "5")
+end
+
+def test_digit_mismatch():
+  let p = pc_digit()
+  | let r = p("x5", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_alpha_match():
+  let p = pc_alpha()
+  | let r = p("a1", 0)
+  | assert_eq(r["ok"], true)
+end
+
+def test_alpha_mismatch():
+  let p = pc_alpha()
+  | let r = p("1a", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_alnum_matches_letter():
+  let p = pc_alnum()
+  | assert_eq(p("a", 0)["ok"], true)
+end
+
+def test_alnum_matches_digit():
+  let p = pc_alnum()
+  | assert_eq(p("1", 0)["ok"], true)
+end
+
+def test_alnum_mismatch():
+  let p = pc_alnum()
+  | assert_eq(p("_", 0)["ok"], false)
+end
+
+def test_space_match():
+  let p = pc_space()
+  | let r = p(" x", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], " ")
+end
+
+def test_space_mismatch():
+  let p = pc_space()
+  | assert_eq(p("x", 0)["ok"], false)
+end
+
+# === pc_regex ===
+
+def test_regex_match():
+  let p = pc_regex("[0-9]+")
+  | let r = p("123abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "123")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_regex_anchored_at_pos():
+  let p = pc_regex("[0-9]+")
+  | let r = p("abc123", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_regex_from_offset():
+  let p = pc_regex("[0-9]+")
+  | let r = p("abc123", 3)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "123")
+end
+
+# === pc_eof / pc_rest ===
+
+def test_eof_succeeds_at_end():
+  let p = pc_eof()
+  | let r = p("abc", 3)
+  | assert_eq(r["ok"], true)
+end
+
+def test_eof_fails_mid_input():
+  let p = pc_eof()
+  | let r = p("abc", 1)
+  | assert_eq(r["ok"], false)
+end
+
+def test_rest_consumes_remainder():
+  let p = pc_rest()
+  | let r = p("abcdef", 2)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "cdef")
+  | assert_eq(r["pos"], 6)
+end
+
+# === pc_map / pc_value / pc_recognize ===
+
+def test_map_transforms_value():
+  let p = pc_map(pc_digit(), fn(c): to_number(c);)
+  | let r = p("5x", 0)
+  | assert_eq(r["value"], 5)
+end
+
+def test_map_preserves_failure():
+  let p = pc_map(pc_digit(), fn(c): to_number(c);)
+  | let r = p("x", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_value_replaces_success_value():
+  let p = pc_value(pc_char("a"), 42)
+  | let r = p("abc", 0)
+  | assert_eq(r["value"], 42)
+end
+
+def test_recognize_returns_consumed_text():
+  let p = pc_recognize(pc_pair(pc_digit(), pc_digit()))
+  | let r = p("12abc", 0)
+  | assert_eq(r["value"], "12")
+end
+
+# === pc_opt / pc_not / pc_peek ===
+
+def test_opt_present():
+  let p = pc_opt(pc_char("a"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "a")
+  | assert_eq(r["pos"], 1)
+end
+
+def test_opt_absent():
+  let p = pc_opt(pc_char("z"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_true(is_none(r["value"]))
+  | assert_eq(r["pos"], 0)
+end
+
+def test_not_succeeds_when_inner_fails():
+  let p = pc_not(pc_char("z"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["pos"], 0)
+end
+
+def test_not_fails_when_inner_succeeds():
+  let p = pc_not(pc_char("a"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 0)
+end
+
+def test_peek_does_not_consume():
+  let p = pc_peek(pc_tag("abc"))
+  | let r = p("abcdef", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "abc")
+  | assert_eq(r["pos"], 0)
+end
+
+def test_peek_propagates_failure():
+  let p = pc_peek(pc_char("z"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 0)
+end
+
+# === pc_pair / pc_preceded / pc_terminated / pc_delimited ===
+
+def test_pair_success():
+  let p = pc_pair(pc_char("a"), pc_char("b"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], ["a", "b"])
+  | assert_eq(r["pos"], 2)
+end
+
+def test_pair_fails_on_first():
+  let p = pc_pair(pc_char("x"), pc_char("b"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 0)
+end
+
+def test_pair_fails_on_second():
+  let p = pc_pair(pc_char("a"), pc_char("x"))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 1)
+end
+
+def test_preceded_keeps_second_value():
+  let p = pc_preceded(pc_char("("), pc_digit())
+  | let r = p("(5)", 0)
+  | assert_eq(r["value"], "5")
+  | assert_eq(r["pos"], 2)
+end
+
+def test_terminated_keeps_first_value():
+  let p = pc_terminated(pc_digit(), pc_char(")"))
+  | let r = p("5)", 0)
+  | assert_eq(r["value"], "5")
+  | assert_eq(r["pos"], 2)
+end
+
+def test_delimited_keeps_middle_value():
+  let p = pc_delimited(pc_char("("), pc_digit(), pc_char(")"))
+  | let r = p("(5)", 0)
+  | assert_eq(r["value"], "5")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_delimited_fails_without_closing():
+  let p = pc_delimited(pc_char("("), pc_digit(), pc_char(")"))
+  | let r = p("(5", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_seq / pc_alt ===
+
+def test_seq_success():
+  let p = pc_seq([pc_char("a"), pc_char("b"), pc_char("c")])
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], ["a", "b", "c"])
+  | assert_eq(r["pos"], 3)
+end
+
+def test_seq_failure_reports_position():
+  let p = pc_seq([pc_char("a"), pc_char("z")])
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+  | assert_eq(r["pos"], 1)
+end
+
+def test_seq_empty_array():
+  let p = pc_seq([])
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], [])
+  | assert_eq(r["pos"], 0)
+end
+
+def test_alt_first_alternative():
+  let p = pc_alt([pc_char("a"), pc_char("b")])
+  | let r = p("abc", 0)
+  | assert_eq(r["value"], "a")
+end
+
+def test_alt_later_alternative():
+  let p = pc_alt([pc_char("x"), pc_char("y"), pc_char("a")])
+  | let r = p("abc", 0)
+  | assert_eq(r["value"], "a")
+end
+
+def test_alt_all_fail():
+  let p = pc_alt([pc_char("x"), pc_char("y")])
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_alt_restarts_at_original_pos():
+  let p = pc_alt([pc_tag("ab"), pc_tag("ac")])
+  | let r = p("ac", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "ac")
+end
+
+# === pc_many0 / pc_many1 / pc_count ===
+
+def test_many0_multiple_matches():
+  let p = pc_many0(pc_digit())
+  | let r = p("123abc", 0)
+  | assert_eq(r["value"], ["1", "2", "3"])
+  | assert_eq(r["pos"], 3)
+end
+
+def test_many0_zero_matches_still_succeeds():
+  let p = pc_many0(pc_digit())
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], [])
+  | assert_eq(r["pos"], 0)
+end
+
+def test_many0_does_not_loop_on_zero_width_match():
+  let p = pc_many0(pc_opt(pc_char("z")))
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["pos"], 0)
+end
+
+def test_many1_multiple_matches():
+  let p = pc_many1(pc_digit())
+  | let r = p("123abc", 0)
+  | assert_eq(r["value"], ["1", "2", "3"])
+end
+
+def test_many1_fails_on_zero_matches():
+  let p = pc_many1(pc_digit())
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_count_exact_matches():
+  let p = pc_count(pc_digit(), 3)
+  | let r = p("12345", 0)
+  | assert_eq(r["value"], ["1", "2", "3"])
+  | assert_eq(r["pos"], 3)
+end
+
+def test_count_fails_when_not_enough():
+  let p = pc_count(pc_digit(), 3)
+  | let r = p("12", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_count_zero():
+  let p = pc_count(pc_digit(), 0)
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], [])
+end
+
+# === pc_sep_by0 / pc_sep_by1 ===
+
+def test_sep_by0_multiple_items():
+  let p = pc_sep_by0(pc_digit(), pc_char(","))
+  | let r = p("1,2,3x", 0)
+  | assert_eq(r["value"], ["1", "2", "3"])
+  | assert_eq(r["pos"], 5)
+end
+
+def test_sep_by0_single_item():
+  let p = pc_sep_by0(pc_digit(), pc_char(","))
+  | let r = p("1x", 0)
+  | assert_eq(r["value"], ["1"])
+end
+
+def test_sep_by0_zero_items():
+  let p = pc_sep_by0(pc_digit(), pc_char(","))
+  | let r = p("x", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], [])
+  | assert_eq(r["pos"], 0)
+end
+
+def test_sep_by0_trailing_separator_not_consumed():
+  let p = pc_sep_by0(pc_digit(), pc_char(","))
+  | let r = p("1,2,", 0)
+  | assert_eq(r["value"], ["1", "2"])
+  | assert_eq(r["pos"], 3)
+end
+
+def test_sep_by1_zero_items_fails():
+  let p = pc_sep_by1(pc_digit(), pc_char(","))
+  | let r = p("x", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_sep_by1_one_item_succeeds():
+  let p = pc_sep_by1(pc_digit(), pc_char(","))
+  | let r = p("1x", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], ["1"])
+end
+
+# === pc_many_till ===
+
+def test_many_till_collects_items_and_end():
+  let p = pc_many_till(pc_any_char(), pc_char(";"))
+  | let r = p("ab;cd", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"]["items"], ["a", "b"])
+  | assert_eq(r["value"]["end"], ";")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_many_till_fails_when_end_never_found():
+  let p = pc_many_till(pc_any_char(), pc_char(";"))
+  | let r = p("abcd", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_many_till_empty_items():
+  let p = pc_many_till(pc_any_char(), pc_char(";"))
+  | let r = p(";abc", 0)
+  | assert_eq(r["value"]["items"], [])
+  | assert_eq(r["value"]["end"], ";")
+end
+
+# === pc_take_while / pc_take_while1 / pc_take_until / pc_take ===
+
+def test_take_while_collects_matching_prefix():
+  let p = pc_take_while(_pc_is_digit)
+  | let r = p("123abc", 0)
+  | assert_eq(r["value"], "123")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_take_while_allows_zero_matches():
+  let p = pc_take_while(_pc_is_digit)
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "")
+end
+
+def test_take_while1_requires_one_match():
+  let p = pc_take_while1(_pc_is_digit)
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_take_while1_collects_matches():
+  let p = pc_take_while1(_pc_is_digit)
+  | let r = p("123abc", 0)
+  | assert_eq(r["value"], "123")
+end
+
+def test_take_until_finds_target():
+  let p = pc_take_until("xyz")
+  | let r = p("abcxyzdef", 0)
+  | assert_eq(r["value"], "abc")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_take_until_fails_when_not_found():
+  let p = pc_take_until("xyz")
+  | let r = p("abcdef", 0)
+  | assert_eq(r["ok"], false)
+end
+
+def test_take_n_characters():
+  let p = pc_take(3)
+  | let r = p("abcdef", 0)
+  | assert_eq(r["value"], "abc")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_take_fails_when_not_enough_input():
+  let p = pc_take(10)
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_whitespace0 / pc_whitespace1 ===
+
+def test_whitespace0_consumes_spaces():
+  let p = pc_whitespace0()
+  | let r = p("   abc", 0)
+  | assert_eq(r["value"], "   ")
+  | assert_eq(r["pos"], 3)
+end
+
+def test_whitespace0_allows_none():
+  let p = pc_whitespace0()
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], "")
+end
+
+def test_whitespace1_requires_one():
+  let p = pc_whitespace1()
+  | let r = p("abc", 0)
+  | assert_eq(r["ok"], false)
+end
+
+# === pc_parse / pc_run ===
+
+def test_parse_returns_raw_result():
+  let r = pc_parse(pc_many0(pc_digit()), "123abc")
+  | assert_eq(r["ok"], true)
+  | assert_eq(r["value"], ["1", "2", "3"])
+  | assert_eq(r["pos"], 3)
+end
+
+def test_run_returns_value_on_full_consumption():
+  let v = pc_run(pc_many0(pc_digit()), "123")
+  | assert_eq(v, ["1", "2", "3"])
+end
+
+def test_run_raises_on_trailing_input():
+  let result = try: pc_run(pc_many0(pc_digit()), "123abc") catch: "caught"
+  | assert_eq(result, "caught")
+end
+
+def test_run_raises_on_parse_failure():
+  let result = try: pc_run(pc_char("a"), "b") catch: "caught"
+  | assert_eq(result, "caught")
+end
+
+# === Composite example: a tiny CSV-like row parser ===
+# Demonstrates combining primitives and combinators the way a user would.
+
+def csv_field():
+  pc_map(pc_take_while(fn(ch): ch != "," && ch != "\n";), trim)
+end
+
+def csv_row():
+  pc_sep_by1(csv_field(), pc_char(","))
+end
+
+def test_composite_csv_row():
+  let v = pc_run(csv_row(), "a, b ,c")
+  | assert_eq(v, ["a", "b", "c"])
+end
+
+def test_composite_csv_row_single_field():
+  let v = pc_run(csv_row(), "only")
+  | assert_eq(v, ["only"])
+end
+
+# === Composite example: recursive grammar via named defs ===
+# A minimal nested-bracket-list grammar: list := "[" (item ("," item)*)? "]"
+# item := list | number
+# This shows that ordinary recursive `def`s compose with the combinators
+# above, since a parser is just a function value.
+
+def bracket_number():
+  pc_map(pc_take_while1(_pc_is_digit), to_number)
+end
+
+def bracket_item(input, pos):
+  let p = pc_alt([bracket_list, bracket_number()])
+  | p(input, pos)
+end
+
+def bracket_list(input, pos):
+  let p = pc_delimited(
+    pc_char("["),
+    pc_sep_by0(bracket_item, pc_char(",")),
+    pc_char("]")
+  )
+  | p(input, pos)
+end
+
+def test_recursive_grammar_flat_list():
+  let v = pc_run(bracket_list, "[1,2,3]")
+  | assert_eq(v, [1, 2, 3])
+end
+
+def test_recursive_grammar_nested_list():
+  let v = pc_run(bracket_list, "[1,[2,3],4]")
+  | assert_eq(v, [1, [2, 3], 4])
+end
+
+def test_recursive_grammar_empty_list():
+  let v = pc_run(bracket_list, "[]")
+  | assert_eq(v, [])
+end
+
+# === Composite example: a small arithmetic expression evaluator ===
+# expr := term (("+" | "-") term)*
+# term := factor (("*" | "/") factor)*
+# factor := number | "(" expr ")"
+# Demonstrates left-associative operator folding and parenthesized recursion.
+
+def arith_ws(p):
+  pc_terminated(p, pc_whitespace0())
+end
+
+def arith_number():
+  arith_ws(pc_map(pc_take_while1(_pc_is_digit), to_number))
+end
+
+def arith_apply_op(acc, pair):
+  let op = pair[0]
+  | let rhs = pair[1]
+  | if (op == "+"): acc + rhs
+    elif (op == "-"): acc - rhs
+    elif (op == "*"): acc * rhs
+    else: acc / rhs
+end
+
+def arith_expr(input, pos):
+  let p = pc_pair(arith_term, pc_many0(pc_pair(arith_ws(pc_one_of("+-")), arith_term)))
+  | let r = p(input, pos)
+  | if (!r["ok"]): r else: pc_ok(r["pos"], fold(r["value"][1], r["value"][0], arith_apply_op))
+end
+
+def arith_term(input, pos):
+  let p = pc_pair(arith_factor, pc_many0(pc_pair(arith_ws(pc_one_of("*/")), arith_factor)))
+  | let r = p(input, pos)
+  | if (!r["ok"]): r else: pc_ok(r["pos"], fold(r["value"][1], r["value"][0], arith_apply_op))
+end
+
+def arith_factor(input, pos):
+  let p = pc_alt([arith_number(), pc_delimited(arith_ws(pc_char("(")), arith_expr, arith_ws(pc_char(")")))])
+  | p(input, pos)
+end
+
+def test_arith_precedence():
+  assert_eq(pc_run(arith_ws(arith_expr), "1 + 2 * 3"), 7)
+end
+
+def test_arith_parens():
+  assert_eq(pc_run(arith_ws(arith_expr), "(1 + 2) * 3"), 9)
+end
+
+def test_arith_left_associative_subtraction():
+  assert_eq(pc_run(arith_ws(arith_expr), "10 - 2 - 3"), 5)
+end
+
+def test_arith_nested_parens():
+  assert_eq(pc_run(arith_ws(arith_expr), "2 * (3 + 4) - 5"), 9)
+end

@@ -1,0 +1,406 @@
+# Parser Combinators for mq, in the spirit of Rust's nom.
+# https://github.com/rust-bakery/nom
+#
+# A parser is a function value with signature `fn(input, pos): result;`
+# where `result` is one of:
+#   {ok: true,  pos: <new position>, value: <parsed value>, error: None}
+#   {ok: false, pos: <position of failure>, value: None, error: <message>}
+#
+# Combinators take one or more parsers and return a new parser, so they
+# compose exactly like nom's combinators: `pc_map(pc_digit(), to_number)`.
+
+# === Result constructors ===
+
+# Builds a success result. Use this when writing a custom parser by hand.
+def pc_ok(pos, value):
+  {ok: true, pos: pos, value: value, error: None}
+end
+
+# Builds a failure result. Use this when writing a custom parser by hand.
+def pc_err(pos, message):
+  {ok: false, pos: pos, value: None, error: message}
+end
+
+# === Internal helpers ===
+
+def _pc_ch(input, pos):
+  if (pos >= len(input)): None else: input[pos]
+end
+
+def _pc_is_digit(ch):
+  !is_none(ch) && ch >= "0" && ch <= "9"
+end
+
+def _pc_is_alpha(ch):
+  !is_none(ch) && is_regex_match(ch, "^[a-zA-Z]$")
+end
+
+def _pc_is_alnum(ch):
+  !is_none(ch) && is_regex_match(ch, "^[a-zA-Z0-9]$")
+end
+
+def _pc_is_space(ch):
+  !is_none(ch) && (ch == " " || ch == "\t" || ch == "\r" || ch == "\n")
+end
+
+# Returns the 1-based line and column for a position, for error messages.
+def pc_pos_to_line_col(input, pos):
+  let head = slice(input, 0, pos)
+  | let lines_ = split(head, "\n")
+  | let line = len(lines_)
+  | let col = len(lines_[line - 1]) + 1
+  | {line: line, col: col}
+end
+
+# === Primitive parsers ===
+# Each of these is a constructor that returns a parser (a `fn(input, pos)` value).
+
+# Matches a single exact character.
+def pc_char(c):
+  fn(input, pos):
+    if (_pc_ch(input, pos) == c): pc_ok(pos + 1, c) else: pc_err(pos, "expected '" + c + "'");
+end
+
+# Matches any single character. Fails at end of input.
+def pc_any_char():
+  fn(input, pos):
+    let ch = _pc_ch(input, pos)
+    | if (is_none(ch)): pc_err(pos, "expected any character, found end of input") else: pc_ok(pos + 1, ch);
+end
+
+# Matches a literal string (nom's `tag`).
+def pc_tag(s):
+  fn(input, pos):
+    let end_pos = pos + len(s)
+    | if (end_pos <= len(input) && slice(input, pos, end_pos) == s): pc_ok(end_pos, s)
+      else: pc_err(pos, "expected \"" + s + "\"");
+end
+
+# Matches a single character for which `pred(ch)` returns true.
+def pc_satisfy(pred):
+  fn(input, pos):
+    let ch = _pc_ch(input, pos)
+    | if (!is_none(ch) && pred(ch)): pc_ok(pos + 1, ch) else: pc_err(pos, "character did not satisfy predicate");
+end
+
+# Matches a single character that appears in `chars`.
+def pc_one_of(chars):
+  pc_satisfy(fn(ch): contains(chars, ch);)
+end
+
+# Matches a single character that does not appear in `chars`.
+def pc_none_of(chars):
+  pc_satisfy(fn(ch): !contains(chars, ch);)
+end
+
+# Matches a single ASCII digit `0`-`9`.
+def pc_digit():
+  pc_satisfy(_pc_is_digit)
+end
+
+# Matches a single ASCII letter.
+def pc_alpha():
+  pc_satisfy(_pc_is_alpha)
+end
+
+# Matches a single alphanumeric ASCII character.
+def pc_alnum():
+  pc_satisfy(_pc_is_alnum)
+end
+
+# Matches a single whitespace character (space, tab, `\r`, `\n`).
+def pc_space():
+  pc_satisfy(_pc_is_space)
+end
+
+# Matches the longest prefix of the remaining input against a regular
+# expression. The pattern is implicitly anchored to the current position.
+def pc_regex(pattern):
+  fn(input, pos):
+    let remaining = slice(input, pos, len(input))
+    | let matches = regex_match(remaining, "^(?:" + pattern + ")")
+    | if (is_empty(matches)): pc_err(pos, "input did not match /" + pattern + "/")
+      else: pc_ok(pos + len(matches[0]), matches[0]);
+end
+
+# Succeeds only when the input is fully consumed. Consumes nothing.
+def pc_eof():
+  fn(input, pos):
+    if (pos >= len(input)): pc_ok(pos, None) else: pc_err(pos, "expected end of input");
+end
+
+# Always succeeds, consuming the rest of the input.
+def pc_rest():
+  fn(input, pos): pc_ok(len(input), slice(input, pos, len(input)));
+end
+
+# === Value-transforming combinators ===
+
+# Transforms a parser's value with `f` on success.
+def pc_map(p, f):
+  fn(input, pos):
+    let r = p(input, pos)
+    | if (r["ok"]): pc_ok(r["pos"], f(r["value"])) else: r;
+end
+
+# Replaces a parser's value with the constant `v` on success.
+def pc_value(p, v):
+  pc_map(p, fn(_): v;)
+end
+
+# Replaces a parser's value with the substring it consumed (nom's `recognize`).
+def pc_recognize(p):
+  fn(input, pos):
+    let r = p(input, pos)
+    | if (r["ok"]): pc_ok(r["pos"], slice(input, pos, r["pos"])) else: r;
+end
+
+# === Lookahead and optionality ===
+
+# Tries `p`; always succeeds. Value is `p`'s value, or `None` if it failed.
+# Consumes nothing when `p` fails.
+def pc_opt(p):
+  fn(input, pos):
+    let r = p(input, pos)
+    | if (r["ok"]): r else: pc_ok(pos, None);
+end
+
+# Negative lookahead: succeeds (consuming nothing) only if `p` fails.
+def pc_not(p):
+  fn(input, pos):
+    let r = p(input, pos)
+    | if (r["ok"]): pc_err(pos, "expected the following parser to fail") else: pc_ok(pos, None);
+end
+
+# Lookahead: runs `p` but never consumes input, regardless of outcome.
+def pc_peek(p):
+  fn(input, pos):
+    let r = p(input, pos)
+    | if (r["ok"]): pc_ok(pos, r["value"]) else: pc_err(pos, r["error"]);
+end
+
+# === Sequencing ===
+
+# Runs `p1` then `p2`. Value is `[v1, v2]`. Fails if either parser fails.
+def pc_pair(p1, p2):
+  fn(input, pos):
+    let r1 = p1(input, pos)
+    | if (!r1["ok"]): r1
+      else:
+        do
+          let r2 = p2(input, r1["pos"])
+          | if (!r2["ok"]): r2 else: pc_ok(r2["pos"], [r1["value"], r2["value"]])
+        end;
+end
+
+# Runs `p1` then `p2`, keeping only `p2`'s value.
+def pc_preceded(p1, p2):
+  pc_map(pc_pair(p1, p2), fn(pair): pair[1];)
+end
+
+# Runs `p1` then `p2`, keeping only `p1`'s value.
+def pc_terminated(p1, p2):
+  pc_map(pc_pair(p1, p2), fn(pair): pair[0];)
+end
+
+# Runs `open`, then `p`, then `close`, keeping only `p`'s value.
+def pc_delimited(open, p, close):
+  pc_preceded(open, pc_terminated(p, close))
+end
+
+# Runs every parser in `parsers` (an array) in order.
+# Value is an array of each parser's value. Fails if any parser fails.
+def pc_seq(parsers):
+  fn(input, pos):
+    var cur = pos
+    | var results = []
+    | var failure = None
+    | var i = 0
+    | let _ = while (i < len(parsers) && is_none(failure)):
+        let r = parsers[i](input, cur)
+        | if (r["ok"]):
+            do results += [r["value"]] | cur = r["pos"] | i += 1 | results end
+          else:
+            do failure = r | i += 1 | results end
+      end
+    | if (is_none(failure)): pc_ok(cur, results) else: failure;
+end
+
+# Tries every parser in `parsers` (an array) in order, from the original
+# position, and returns the first success (nom's `alt`).
+def pc_alt(parsers):
+  fn(input, pos):
+    var result = pc_err(pos, "no alternative matched")
+    | var i = 0
+    | var done = false
+    | let _ = while (i < len(parsers) && !done):
+        let r = parsers[i](input, pos)
+        | if (r["ok"]): do result = r | done = true | result end
+          else: do result = r | i += 1 | result end
+      end
+    | result;
+end
+
+# === Repetition ===
+
+# Repeats `p` zero or more times. Always succeeds. Value is an array.
+def pc_many0(p):
+  fn(input, pos):
+    var cur = pos
+    | var results = []
+    | var cont = true
+    | let _ = while (cont):
+        let r = p(input, cur)
+        | if (r["ok"] && r["pos"] > cur):
+            do results += [r["value"]] | cur = r["pos"] | results end
+          else:
+            do cont = false | results end
+      end
+    | pc_ok(cur, results);
+end
+
+# Repeats `p` one or more times. Fails if `p` does not match at least once.
+def pc_many1(p):
+  fn(input, pos):
+    let many0_p = pc_many0(p)
+    | let r = many0_p(input, pos)
+    | if (is_empty(r["value"])): pc_err(pos, "expected at least one match") else: r;
+end
+
+# Repeats `p` exactly `n` times. Fails if fewer than `n` matches are found.
+def pc_count(p, n):
+  fn(input, pos):
+    var cur = pos
+    | var results = []
+    | var failure = None
+    | var i = 0
+    | let _ = while (i < n && is_none(failure)):
+        let r = p(input, cur)
+        | if (r["ok"]):
+            do results += [r["value"]] | cur = r["pos"] | i += 1 | results end
+          else:
+            do failure = r | i += 1 | results end
+      end
+    | if (is_none(failure)): pc_ok(cur, results) else: failure;
+end
+
+# Repeats `p`, separated by `sep`, zero or more times. Always succeeds.
+def pc_sep_by0(p, sep):
+  fn(input, pos):
+    let first_ = p(input, pos)
+    | if (!first_["ok"]): pc_ok(pos, [])
+      else:
+        do
+          let tail_p = pc_many0(pc_preceded(sep, p))
+          | let rest_ = tail_p(input, first_["pos"])
+          | pc_ok(rest_["pos"], [first_["value"]] + rest_["value"])
+        end;
+end
+
+# Repeats `p`, separated by `sep`, one or more times.
+# Fails if `p` does not match at least once.
+def pc_sep_by1(p, sep):
+  fn(input, pos):
+    let sep_by0_p = pc_sep_by0(p, sep)
+    | let r = sep_by0_p(input, pos)
+    | if (is_empty(r["value"])): pc_err(pos, "expected at least one match") else: r;
+end
+
+# Repeats `p` until `end_p` succeeds. Value is `{items: [...], end: <end_p's value>}`.
+# Fails if `end_p` never succeeds before the input is exhausted.
+def pc_many_till(p, end_p):
+  fn(input, pos):
+    var cur = pos
+    | var results = []
+    | var ended = None
+    | var failed = None
+    | let _ = while (is_none(ended) && is_none(failed)):
+        let er = end_p(input, cur)
+        | if (er["ok"]):
+            do ended = er | results end
+          else:
+            do
+              let r = p(input, cur)
+              | if (r["ok"]):
+                  do results += [r["value"]] | cur = r["pos"] | results end
+                else:
+                  do failed = r | results end
+            end
+      end
+    | if (!is_none(failed)): failed else: pc_ok(ended["pos"], {items: results, "end": ended["value"]});
+end
+
+# Consumes characters while `pred(ch)` is true. Always succeeds (may consume
+# zero characters). Value is the consumed substring.
+def pc_take_while(pred):
+  fn(input, pos):
+    var cur = pos
+    | let _ = while (cur < len(input) && pred(input[cur])): cur += 1 end
+    | pc_ok(cur, slice(input, pos, cur));
+end
+
+# Like `pc_take_while`, but fails if zero characters are consumed.
+def pc_take_while1(pred):
+  fn(input, pos):
+    let take_while_p = pc_take_while(pred)
+    | let r = take_while_p(input, pos)
+    | if (r["pos"] == pos): pc_err(pos, "expected at least one matching character") else: r;
+end
+
+# Consumes characters up to (but not including) the first occurrence of `s`.
+# Fails if `s` does not occur in the remaining input.
+def pc_take_until(s):
+  fn(input, pos):
+    let remaining = slice(input, pos, len(input))
+    | let i = index(remaining, s)
+    | if (i < 0): pc_err(pos, "expected to find \"" + s + "\"") else: pc_ok(pos + i, slice(remaining, 0, i));
+end
+
+# Consumes exactly `n` characters. Fails if fewer than `n` characters remain.
+def pc_take(n):
+  fn(input, pos):
+    let end_pos = pos + n
+    | if (end_pos > len(input)): pc_err(pos, "expected " + to_string(n) + " more characters")
+      else: pc_ok(end_pos, slice(input, pos, end_pos));
+end
+
+# Zero or more whitespace characters. Always succeeds. Value is the consumed string.
+def pc_whitespace0():
+  pc_take_while(_pc_is_space)
+end
+
+# One or more whitespace characters. Fails if none are found.
+def pc_whitespace1():
+  pc_take_while1(_pc_is_space)
+end
+
+# === Running a parser ===
+
+# Runs `p` against `input`, starting at position 0.
+# Returns the raw result `{ok, pos, value, error}` — the input does not need
+# to be fully consumed for `ok` to be true. Use this when you intend to
+# inspect `pos` yourself, e.g. to keep parsing the remainder of the input.
+def pc_parse(p, input):
+  p(to_string(input), 0)
+end
+
+# Runs `p` against `input` and requires the entire input to be consumed.
+# Returns the parsed value directly on success. Raises a descriptive error
+# (with line/column information) if `p` fails or stops before the end of
+# the input.
+def pc_run(p, input):
+  let src = to_string(input)
+  | let r = p(src, 0)
+  | if (r["ok"] && r["pos"] >= len(src)):
+      r["value"]
+    elif (r["ok"]):
+      do
+        let loc = pc_pos_to_line_col(src, r["pos"])
+        | error("unexpected trailing input at line " + to_string(loc["line"]) + ", column " + to_string(loc["col"]))
+      end
+    else:
+      do
+        let loc = pc_pos_to_line_col(src, r["pos"])
+        | error(r["error"] + " at line " + to_string(loc["line"]) + ", column " + to_string(loc["col"]))
+      end
+end
