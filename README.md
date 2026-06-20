@@ -1,6 +1,9 @@
 <h1 align="center">parser_combinator.mq</h1>
 
-A small parser-combinator toolkit for [mq](https://github.com/harehare/mq), in the spirit of Rust's [nom](https://github.com/rust-bakery/nom). It gives you the building blocks (`pc_char`, `pc_tag`, `pc_regex`, ...) and combinators (`pc_map`, `pc_many0`, `pc_alt`, `pc_sep_by0`, ...) to write small, composable parsers directly in mq, instead of hand-rolling string slicing and index bookkeeping every time.
+> [!WARNING]
+> This project is under active development. APIs may change, and there are known performance issues, especially with large inputs or deeply nested grammars.
+
+A small parser-combinator toolkit for [mq](https://github.com/harehare/mq), in the spirit of Rust's [nom](https://github.com/rust-bakery/nom).
 
 ## Concept
 
@@ -220,3 +223,4 @@ let many_digits = pc_many0(pc_digit())
 ## License
 
 MIT
+
